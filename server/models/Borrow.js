@@ -1,0 +1,117 @@
+import mongoose from 'mongoose';
+
+const borrowSchema = new mongoose.Schema(
+  {
+    item: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Item',
+      required: true,
+    },
+    borrower: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
+    owner: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
+    borrowDate: {
+      type: Date,
+      default: Date.now,
+    },
+    dueDate: {
+      type: Date,
+      required: true,
+    },
+    returnDate: {
+      type: Date,
+    },
+    returnSignaledAt: {
+      type: Date,
+    },
+    status: {
+      type: String,
+      enum: ['pending', 'active', 'returned', 'overdue', 'rejected'],
+      default: 'pending',
+    },
+    depositAmount: {
+      type: Number,
+      default: 0,
+    },
+    depositPaid: {
+      type: Boolean,
+      default: false,
+    },
+    depositStatus: {
+      type: String,
+      enum: ['not_required', 'pending', 'payment_pending', 'held', 'return_pending', 'return_sent', 'returned'],
+    },
+    depositPaymentReportedAt: {
+      type: Date,
+    },
+    depositReceivedAt: {
+      type: Date,
+    },
+    depositReturnSentAt: {
+      type: Date,
+    },
+    depositReturnAcknowledgedAt: {
+      type: Date,
+    },
+    fineAmount: {
+      type: Number,
+      default: 0,
+    },
+    finePaid: {
+      type: Boolean,
+      default: false,
+    },
+    finePaymentStatus: {
+      type: String,
+      enum: ['pending', 'payment_pending', 'paid'],
+    },
+    finePaymentReportedAt: {
+      type: Date,
+    },
+    finePaymentConfirmedAt: {
+      type: Date,
+    },
+    paymentStatus: {
+      type: String,
+      enum: ['pending', 'paid', 'overdue'],
+      default: 'pending',
+    },
+    borrowerRating: {
+      type: Number,
+      min: 1,
+      max: 5,
+    },
+    borrowerReview: {
+      type: String,
+    },
+    ownerRating: {
+      type: Number,
+      min: 1,
+      max: 5,
+    },
+    ownerReview: {
+      type: String,
+    },
+    itemRating: {
+      type: Number,
+      min: 1,
+      max: 5,
+    },
+    itemReview: {
+      type: String,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+const Borrow = mongoose.model('Borrow', borrowSchema);
+export default Borrow;

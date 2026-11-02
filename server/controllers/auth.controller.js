@@ -1,0 +1,119 @@
+import User from '../models/User.js';
+import jwt from 'jsonwebtoken';
+
+const generateToken = (id) => {
+  return jwt.sign({ id }, process.env.JWT_SECRET, {
+    expiresIn: process.env.JWT_EXPIRE,
+  });
+};
+
+export const serializeUser = (user) => ({
+  success: true,
+  _id: user._id,
+  name: user.name,
+  email: user.email,
+  phone: user.phone,
+  profilePhoto: user.profilePhoto,
+  role: user.role,
+  averageRating: user.averageRating,
+  totalRatings: user.totalRatings,
+  createdAt: user.createdAt,
+});
+
+export const register = async (req, res, next) => {
+  try {
+    const { name, email, password, phone, profilePhoto } = req.body;
+
+    const userExists = await User.findOne({ email });
+
+    if (userExists) {
+      res.status(400);
+      throw new Error('User already exists');
+    }
+
+    const user = await User.create({
+      name,
+      email,
+      password,
+      phone,
+      profilePhoto,
+    });
+
+    if (user) {
+      res.status(201).json({
+        ...serializeUser(user),
+        token: generateToken(user._id),
+      });
+    } else {
+      res.status(400);
+      throw new Error('Invalid user data');
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const login = async (req, res, next) => {
+  try {
+    const { email, password } = req.body;
+
+    const user = await User.findOne({ email });
+
+    if (user && (await user.matchPassword(password))) {
+      res.json({
+        ...serializeUser(user),
+        token: generateToken(user._id),
+      });
+    } else {
+      res.status(401);
+      throw new Error('Invalid email or password');
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getMe = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id);
+
+    if (user) {
+      res.json(serializeUser(user));
+    } else {
+      res.status(404);
+      throw new Error('User not found');
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateProfile = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id);
+
+    if (user) {
+      if (typeof req.body.name === 'string' && req.body.name.trim()) {
+        user.name = req.body.name.trim();
+      }
+      if (typeof req.body.phone === 'string') {
+        user.phone = req.body.phone.trim();
+      }
+      if (req.file?.s3Url) {
+        user.profilePhoto = req.file.s3Url;
+      }
+
+      const updatedUser = await user.save();
+
+      res.json({
+        ...serializeUser(updatedUser),
+        token: generateToken(updatedUser._id),
+      });
+    } else {
+      res.status(404);
+      throw new Error('User not found');
+    }
+  } catch (error) {
+    next(error);
+  }
+};

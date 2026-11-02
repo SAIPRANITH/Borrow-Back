@@ -1,0 +1,799 @@
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, View, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, Alert, KeyboardAvoidingView, Platform, Image, Linking } from 'react-native';
+import Text from '../components/ThemedText';
+import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useAuth } from '../context/AuthContext';
+import api from '../api/api';
+import { theme } from '../theme';
+import * as ImagePicker from 'expo-image-picker';
+import appConfig from '../../app.json';
+import Input from '../components/Input';
+import Button from '../components/Button';
+import Card from '../components/Card';
+
+export default function ProfileScreen() {
+  const navigation = useNavigation();
+  const { user, logout, updateUser, refreshUser } = useAuth();
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [name, setName] = useState(user?.name || '');
+  const [phone, setPhone] = useState(user?.phone || '');
+  const [profilePhoto, setProfilePhoto] = useState(user?.profilePhoto || '');
+  const [profilePhotoLoaded, setProfilePhotoLoaded] = useState(false);
+  const [profilePhotoFailed, setProfilePhotoFailed] = useState(false);
+  const [photoFile, setPhotoFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [profileError, setProfileError] = useState('');
+  const [profileStats, setProfileStats] = useState({
+    items: 0,
+    borrows: 0,
+    requests: 0,
+    financial: null,
+  });
+
+  useEffect(() => {
+    setName(user?.name || '');
+    setPhone(user?.phone || '');
+    setProfilePhoto(user?.profilePhoto || '');
+    setProfilePhotoLoaded(false);
+    setProfilePhotoFailed(false);
+  }, [user?.name, user?.phone, user?.profilePhoto]);
+
+  const profileRating = {
+    average: Number(user?.averageRating) || 0,
+    count: Number(user?.totalRatings) || 0,
+  };
+
+  const refreshProfile = useCallback(async () => {
+    setRefreshing(true);
+    setProfileError('');
+    try {
+      const [itemsResponse, borrowsResponse, incomingResponse, financialResponse] = await Promise.all([
+        api.get('/items/mine'),
+        api.get('/borrows/mine'),
+        api.get('/borrows/incoming'),
+        api.get('/borrows/financial'),
+        refreshUser(),
+      ]);
+      setProfileStats({
+        items: itemsResponse.data?.count || 0,
+        borrows: borrowsResponse.data?.count || 0,
+        requests: incomingResponse.data?.count || 0,
+        financial: financialResponse.data?.summary || null,
+      });
+    } catch (error) {
+      setProfileError(
+        error.response?.data?.message || 'Could not load your profile information. Check your connection and try again.'
+      );
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshUser]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshProfile();
+    }, [refreshProfile])
+  );
+
+  const getInitials = (name) => {
+    if (!name) return 'U';
+    return name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+  };
+  const memberYear = user?.createdAt ? new Date(user.createdAt).getFullYear() : null;
+
+  const handleChoosePhoto = async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission required', 'Allow photo library access to select a profile photo.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.8,
+      });
+      if (result.canceled) return;
+
+      const asset = result.assets[0];
+      if (asset.fileSize && asset.fileSize > 5 * 1024 * 1024) {
+        Alert.alert('Image too large', 'Choose an image smaller than 5 MB.');
+        return;
+      }
+      setPhotoFile({
+        uri: asset.uri,
+        name: asset.fileName || `profile-${Date.now()}.jpg`,
+        type: asset.mimeType || 'image/jpeg',
+      });
+      setProfilePhotoLoaded(false);
+      setProfilePhotoFailed(false);
+      setProfilePhoto(asset.uri);
+    } catch (error) {
+      console.error('Failed to select a profile photo:', error);
+      Alert.alert('Unable to select photo', 'Please try again.');
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    if (!name.trim()) {
+      Alert.alert('Error', 'Name cannot be empty');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const profileData = new FormData();
+      profileData.append('name', name.trim());
+      profileData.append('phone', phone);
+      if (photoFile) profileData.append('image', photoFile);
+      const updatedUser = await updateUser(profileData);
+      setProfilePhoto(updatedUser?.profilePhoto || profilePhoto);
+      setProfilePhotoLoaded(false);
+      setProfilePhotoFailed(false);
+      setPhotoFile(null);
+      setIsEditing(false);
+      Alert.alert('Success', 'Profile updated successfully');
+    } catch (error) {
+      Alert.alert('Error', error.response?.data?.message || 'Failed to update profile');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openSupportLink = async (url) => {
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('Unable to open link', 'Please try again or use the contact details shown.');
+    }
+  };
+
+  const handleLogout = () => {
+    Alert.alert(
+      'Logout',
+      'Are you sure you want to log out?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Logout', style: 'destructive', onPress: logout },
+      ]
+    );
+  };
+
+  const renderStars = (rating) => {
+    const stars = [];
+    const fullStars = Math.floor(rating);
+    const hasHalfStar = rating % 1 >= 0.5;
+
+    for (let i = 0; i < 5; i++) {
+      if (i < fullStars) {
+        stars.push(<Ionicons key={i} name="star" size={16} color={theme.colors.accent} />);
+      } else if (i === fullStars && hasHalfStar) {
+        stars.push(<Ionicons key={i} name="star-half" size={16} color={theme.colors.accent} />);
+      } else {
+        stars.push(<Ionicons key={i} name="star-outline" size={16} color={theme.colors.border} />);
+      }
+    }
+    return stars;
+  };
+
+  if (!user) {
+    return (
+      <View style={styles.profileLoading}>
+        {refreshing ? (
+          <ActivityIndicator size="large" color={theme.colors.secondary} />
+        ) : (
+          <>
+            <Text style={styles.profileLoadError}>
+              {profileError || 'Your profile is not available yet.'}
+            </Text>
+            <Button title="Try Again" onPress={refreshProfile} />
+          </>
+        )}
+      </View>
+    );
+  }
+
+  return (
+    <KeyboardAvoidingView 
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={refreshProfile}
+            tintColor={theme.colors.secondary}
+            colors={[theme.colors.secondary]}
+          />
+        }
+      >
+        
+        {/* Profile Header */}
+        <View style={styles.header}>
+          <View style={styles.memberStamp}>
+            <Ionicons name="people-outline" size={13} color={theme.colors.secondary} />
+            <Text style={styles.memberStampText}>BORROWBACK MEMBER</Text>
+          </View>
+          {profileError ? <Text style={styles.profileLoadError}>{profileError}</Text> : null}
+          <View style={styles.avatarContainer}>
+            <Text style={styles.avatarText}>{getInitials(user?.name)}</Text>
+            {profilePhoto && !profilePhotoFailed ? (
+              <Image
+                source={{ uri: profilePhoto }}
+                style={[styles.avatarImage, { opacity: profilePhotoLoaded ? 1 : 0 }]}
+                resizeMode="cover"
+                onLoad={() => setProfilePhotoLoaded(true)}
+                onError={(error) => {
+                  console.warn('Could not load the profile photo:', error.nativeEvent.error);
+                  setProfilePhotoLoaded(false);
+                  setProfilePhotoFailed(true);
+                }}
+              />
+            ) : null}
+            {isEditing && (
+              <TouchableOpacity
+                style={styles.avatarEditButton}
+                onPress={handleChoosePhoto}
+                accessibilityRole="button"
+                accessibilityLabel="Choose a profile photo"
+              >
+                <Ionicons name="camera-outline" size={17} color={theme.colors.text} />
+              </TouchableOpacity>
+            )}
+          </View>
+          <Text style={styles.nameText}>{user?.name}</Text>
+          <Text style={styles.emailText}>{user?.email}</Text>
+          
+          <View style={styles.ratingContainer}>
+            <View style={styles.starsRow}>
+              {renderStars(profileRating.average)}
+            </View>
+            <Text style={styles.ratingText}>
+              {profileRating.average.toFixed(1)} ({profileRating.count} reviews)
+            </Text>
+          </View>
+          {memberYear ? <Text style={styles.memberSince}>Member since {memberYear}</Text> : null}
+        </View>
+
+        <View style={styles.statsGrid}>
+          <View style={styles.statCard}>
+            <Text style={styles.statLabel}>Rating</Text>
+            <Text style={styles.statValue}>{profileRating.average.toFixed(1)} / 5</Text>
+            <Text style={styles.statDetail}>{profileRating.count} reviews</Text>
+          </View>
+          <View style={styles.statCard}>
+            <Text style={styles.statLabel}>Items Listed</Text>
+            <Text style={styles.statValue}>{profileStats.items}</Text>
+            <Text style={styles.statDetail}>Your listings</Text>
+          </View>
+          <View style={styles.statCard}>
+            <Text style={styles.statLabel}>Borrow History</Text>
+            <Text style={styles.statValue}>{profileStats.borrows}</Text>
+            <Text style={styles.statDetail}>Items borrowed</Text>
+          </View>
+          <View style={styles.statCard}>
+            <Text style={styles.statLabel}>Incoming Requests</Text>
+            <Text style={styles.statValue}>{profileStats.requests}</Text>
+            <Text style={styles.statDetail}>Awaiting your response</Text>
+          </View>
+        </View>
+
+        <Card style={styles.sectionCard}>
+          <Text style={[styles.sectionTitle, styles.financialTitle]}>Financial Overview</Text>
+          <View style={styles.financialGrid}>
+            <View style={styles.financialPanel}>
+              <Text style={styles.financialHeading}>Borrowing Summary</Text>
+              <View style={styles.financialRow}>
+                <Text style={styles.financialLabel}>Deposits Paid</Text>
+                <Text style={styles.financialValue}>
+                  ₹{profileStats.financial?.borrower?.totalDepositsPaid || 0}
+                </Text>
+              </View>
+              <View style={styles.financialRow}>
+                <Text style={styles.financialLabel}>Fines Paid</Text>
+                <Text style={styles.financialValue}>
+                  ₹{profileStats.financial?.borrower?.totalFinesPaid || 0}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.financialPanel}>
+              <Text style={styles.financialHeading}>Lending Summary</Text>
+              <View style={styles.financialRow}>
+                <Text style={styles.financialLabel}>Deposits Collected</Text>
+                <Text style={styles.financialValue}>
+                  ₹{profileStats.financial?.owner?.totalDepositsCollected || 0}
+                </Text>
+              </View>
+              <View style={styles.financialRow}>
+                <Text style={styles.financialLabel}>Fines Collected</Text>
+                <Text style={styles.financialValue}>
+                  ₹{profileStats.financial?.owner?.totalFinesCollected || 0}
+                </Text>
+              </View>
+            </View>
+          </View>
+        </Card>
+
+        {/* Edit Profile Section */}
+        <Card style={styles.sectionCard}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Personal Information</Text>
+            <TouchableOpacity onPress={() => {
+              if (isEditing) {
+                setName(user?.name || '');
+                setPhone(user?.phone || '');
+                setProfilePhoto(user?.profilePhoto || '');
+                setPhotoFile(null);
+              } else {
+                setProfilePhoto(user?.profilePhoto || '');
+                setPhotoFile(null);
+              }
+              setIsEditing(!isEditing);
+            }}>
+              <Text style={styles.editButtonText}>{isEditing ? 'Cancel' : 'Edit'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {isEditing ? (
+            <View style={styles.editForm}>
+              <Input
+                label="Full Name"
+                value={name}
+                onChangeText={setName}
+                placeholder="Enter your name"
+              />
+              <Input
+                label="Phone Number"
+                value={phone}
+                onChangeText={setPhone}
+                placeholder="Enter your phone number"
+                keyboardType="phone-pad"
+              />
+              <TouchableOpacity
+                style={styles.choosePhotoButton}
+                onPress={handleChoosePhoto}
+                accessibilityRole="button"
+              >
+                <Ionicons name="image-outline" size={18} color={theme.colors.secondary} />
+                <Text style={styles.choosePhotoText}>
+                  {photoFile ? 'Choose a different photo' : 'Upload profile photo'}
+                </Text>
+              </TouchableOpacity>
+              <Button 
+                title="Save Changes" 
+                onPress={handleSaveProfile} 
+                loading={loading}
+                style={styles.saveButton}
+              />
+            </View>
+          ) : (
+            <View style={styles.infoDisplay}>
+              <View style={styles.infoRow}>
+                <Ionicons name="call-outline" size={20} color={theme.colors.textSecondary} style={styles.infoIcon} />
+                <Text style={styles.infoText}>{user?.phone || 'No phone number added'}</Text>
+              </View>
+            </View>
+          )}
+        </Card>
+
+        <Card style={styles.helpCard}>
+          <Text style={styles.sectionTitle}>Help &amp; support</Text>
+          <Text style={styles.helpDescription}>
+            Questions about your account, a return, or a payment? Get in touch.
+          </Text>
+          <TouchableOpacity
+            style={styles.supportRow}
+            onPress={() => openSupportLink('tel:8498970129')}
+            accessibilityRole="link"
+          >
+            <Ionicons name="call-outline" size={19} color={theme.colors.secondary} />
+            <Text style={styles.supportText}>8498970129</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.supportRow}
+            onPress={() => openSupportLink('mailto:saipranithreddyvaka@gmail.com')}
+            accessibilityRole="link"
+          >
+            <Ionicons name="mail-outline" size={19} color={theme.colors.secondary} />
+            <Text style={styles.supportEmail}>saipranithreddyvaka@gmail.com</Text>
+          </TouchableOpacity>
+        </Card>
+
+        {/* Actions Section */}
+        <View style={styles.actionsContainer}>
+          <Text style={styles.actionsHeader}>Shortcuts</Text>
+
+          <TouchableOpacity
+            style={styles.actionItem}
+            onPress={() => navigation.navigate('MyItemsList')}
+          >
+            <View style={[styles.actionIconBg, { backgroundColor: `${theme.colors.secondary}15` }]}>
+              <Ionicons name="cube-outline" size={22} color={theme.colors.secondary} />
+            </View>
+            <Text style={styles.actionItemText}>My Items</Text>
+            <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.actionItem}
+            onPress={() => navigation.navigate('Borrows')}
+          >
+            <View style={[styles.actionIconBg, { backgroundColor: `${theme.colors.accent}15` }]}>
+              <Ionicons name="hand-left-outline" size={22} color={theme.colors.accent} />
+            </View>
+            <Text style={styles.actionItemText}>Borrow Activity</Text>
+            <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.actionItem} 
+            onPress={() => navigation.navigate('Home', { screen: 'Fines' })}
+          >
+            <View style={[styles.actionIconBg, { backgroundColor: `${theme.colors.primary}15` }]}>
+              <Ionicons name="wallet-outline" size={22} color={theme.colors.primary} />
+            </View>
+            <Text style={styles.actionItemText}>Finances</Text>
+            <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.actionItem} 
+            onPress={() => navigation.navigate('Loans', { screen: 'MoneyLoans' })}
+          >
+            <View style={[styles.actionIconBg, { backgroundColor: `${theme.colors.success}15` }]}>
+              <Ionicons name="cash-outline" size={22} color={theme.colors.success} />
+            </View>
+            <Text style={styles.actionItemText}>Money Loans</Text>
+            <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.actionItem} 
+            onPress={() => navigation.navigate('Notifications')}
+          >
+            <View style={[styles.actionIconBg, { backgroundColor: `${theme.colors.secondary}15` }]}>
+              <Ionicons name="notifications-outline" size={22} color={theme.colors.secondary} />
+            </View>
+            <Text style={styles.actionItemText}>Notifications</Text>
+            <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Logout */}
+        <Button 
+          title="Log Out" 
+          onPress={handleLogout} 
+          style={styles.logoutButton}
+          textStyle={{ color: theme.colors.error }}
+        />
+        
+        <Text style={styles.versionText}>BorrowBack v{appConfig.expo.version}</Text>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  profileLoading: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: theme.spacing.lg,
+    backgroundColor: 'transparent',
+  },
+  profileLoadError: {
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: theme.spacing.md,
+  },
+  scrollContent: {
+    padding: theme.spacing.md,
+    paddingBottom: theme.spacing.xl,
+  },
+  header: {
+    alignItems: 'center',
+    backgroundColor: theme.colors.glass,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.09)',
+    borderRadius: theme.borderRadius.xl,
+    marginBottom: theme.spacing.md,
+    paddingTop: theme.spacing.xl,
+    paddingBottom: theme.spacing.xl,
+    paddingHorizontal: theme.spacing.md,
+    overflow: 'hidden',
+    ...theme.shadows.card,
+  },
+  memberStamp: {
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: `${theme.colors.accent}99`,
+    borderRadius: theme.borderRadius.full,
+    marginBottom: theme.spacing.md,
+  },
+  memberStampText: {
+    color: theme.colors.accent,
+    fontSize: 9,
+    fontWeight: theme.typography.weights.bold,
+    letterSpacing: 1,
+  },
+  avatarContainer: {
+    width: 96,
+    height: 96,
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surfaceRaised,
+    borderWidth: 2,
+    borderColor: 'rgba(255,112,101,0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+    marginBottom: theme.spacing.md,
+    ...theme.shadows.card,
+  },
+  avatarText: {
+    fontSize: 34,
+    color: theme.colors.primary,
+    fontWeight: theme.typography.weights.bold,
+  },
+  avatarImage: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+    borderRadius: theme.borderRadius.lg,
+  },
+  avatarEditButton: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: theme.colors.secondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: theme.colors.background,
+  },
+  nameText: {
+    fontSize: theme.typography.sizes.xxl,
+    fontWeight: theme.typography.weights.bold,
+    color: theme.colors.text,
+    marginBottom: 4,
+  },
+  emailText: {
+    fontSize: theme.typography.sizes.md,
+    color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.sm,
+  },
+  ratingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing.xs,
+    backgroundColor: 'transparent',
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.xs,
+  },
+  starsRow: {
+    flexDirection: 'row',
+    marginRight: theme.spacing.sm,
+  },
+  ratingText: {
+    fontSize: theme.typography.sizes.sm,
+    color: theme.colors.text,
+    fontWeight: theme.typography.weights.medium,
+  },
+  memberSince: {
+    fontSize: theme.typography.sizes.xs,
+    color: theme.colors.text,
+    marginTop: theme.spacing.sm,
+  },
+  sectionCard: {
+    marginBottom: theme.spacing.xl,
+    padding: theme.spacing.md,
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: theme.spacing.sm,
+    marginBottom: theme.spacing.md,
+  },
+  statCard: {
+    width: '48%',
+    minHeight: 104,
+    justifyContent: 'center',
+    padding: theme.spacing.md,
+    backgroundColor: theme.colors.glass,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.lg,
+  },
+  statLabel: {
+    color: theme.colors.textSecondary,
+    fontSize: theme.typography.sizes.xs,
+    marginBottom: theme.spacing.xs,
+  },
+  statValue: {
+    color: theme.colors.text,
+    fontSize: theme.typography.sizes.xl,
+    fontWeight: theme.typography.weights.bold,
+  },
+  statDetail: {
+    color: theme.colors.textSecondary,
+    fontSize: theme.typography.sizes.xs,
+    marginTop: theme.spacing.xs,
+  },
+  financialTitle: {
+    marginBottom: theme.spacing.md,
+  },
+  financialGrid: {
+    gap: theme.spacing.sm,
+  },
+  financialPanel: {
+    padding: theme.spacing.md,
+    backgroundColor: theme.colors.surfaceRaised,
+    borderRadius: theme.borderRadius.md,
+  },
+  financialHeading: {
+    color: theme.colors.textSecondary,
+    fontSize: theme.typography.sizes.sm,
+    fontWeight: theme.typography.weights.semibold,
+    marginBottom: theme.spacing.sm,
+  },
+  financialRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
+  },
+  financialLabel: {
+    flexShrink: 1,
+    color: theme.colors.textSecondary,
+    fontSize: theme.typography.sizes.sm,
+  },
+  financialValue: {
+    color: theme.colors.text,
+    fontSize: theme.typography.sizes.sm,
+    fontWeight: theme.typography.weights.bold,
+  },
+  helpCard: {
+    marginBottom: theme.spacing.xl,
+    padding: theme.spacing.md,
+  },
+  helpDescription: {
+    color: theme.colors.textSecondary,
+    fontSize: theme.typography.sizes.sm,
+    lineHeight: 20,
+    marginTop: theme.spacing.sm,
+    marginBottom: theme.spacing.md,
+  },
+  supportRow: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+  },
+  supportText: {
+    color: theme.colors.text,
+    fontSize: theme.typography.sizes.md,
+  },
+  supportEmail: {
+    flexShrink: 1,
+    color: theme.colors.text,
+    fontSize: theme.typography.sizes.sm,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: theme.spacing.md,
+  },
+  sectionTitle: {
+    fontSize: theme.typography.sizes.lg,
+    fontWeight: theme.typography.weights.bold,
+    color: theme.colors.text,
+  },
+  editButtonText: {
+    fontSize: theme.typography.sizes.md,
+    color: theme.colors.secondary,
+    fontWeight: theme.typography.weights.semibold,
+  },
+  editForm: {
+    marginTop: theme.spacing.sm,
+  },
+  choosePhotoButton: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+    marginTop: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.sm,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.md,
+  },
+  choosePhotoText: {
+    color: theme.colors.text,
+    fontSize: theme.typography.sizes.sm,
+    fontWeight: theme.typography.weights.medium,
+  },
+  saveButton: {
+    marginTop: theme.spacing.md,
+  },
+  infoDisplay: {
+    marginTop: theme.spacing.xs,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing.sm,
+  },
+  infoIcon: {
+    marginRight: theme.spacing.sm,
+  },
+  infoText: {
+    fontSize: theme.typography.sizes.md,
+    color: theme.colors.text,
+  },
+  actionsContainer: {
+    marginBottom: theme.spacing.xl,
+  },
+  actionsHeader: {
+    fontSize: theme.typography.sizes.md,
+    fontWeight: theme.typography.weights.bold,
+    color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.md,
+    marginLeft: theme.spacing.xs,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  actionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    padding: theme.spacing.md,
+    marginBottom: theme.spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  actionIconBg: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: theme.spacing.md,
+  },
+  actionItemText: {
+    flex: 1,
+    fontSize: theme.typography.sizes.md,
+    fontWeight: theme.typography.weights.medium,
+    color: theme.colors.text,
+  },
+  logoutButton: {
+    backgroundColor: `${theme.colors.error}10`,
+    borderWidth: 1,
+    borderColor: `${theme.colors.error}30`,
+    marginBottom: theme.spacing.xl,
+  },
+  versionText: {
+    textAlign: 'center',
+    color: theme.colors.inkMuted,
+    fontSize: theme.typography.sizes.xs,
+  },
+});

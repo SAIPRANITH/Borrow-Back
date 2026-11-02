@@ -1,0 +1,327 @@
+import React, { useState } from 'react';
+import { 
+  View, 
+  StyleSheet, 
+  KeyboardAvoidingView, 
+  Platform, 
+  ScrollView, 
+  TouchableOpacity
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../context/AuthContext';
+import Input from '../components/Input';
+import Button from '../components/Button';
+import BorrowBackMark from '../components/BorrowBackMark';
+import { theme } from '../theme';
+import Text from '../components/ThemedText';
+
+const RegisterScreen = ({ navigation }) => {
+  const { register, loading, error, clearError } = useAuth();
+  
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [validationError, setValidationError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleRegister = async () => {
+    if (submitting) return;
+    setValidationError('');
+
+    if (!name.trim() || !email.trim() || !phone.trim() || !password || !confirmPassword) {
+      setValidationError('All fields are required.');
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setValidationError('Enter a valid email address.');
+      return;
+    }
+    
+    if (password.length < 6) {
+      setValidationError('Password must be at least 6 characters long.');
+      return;
+    }
+    
+    if (password !== confirmPassword) {
+      setValidationError('Passwords do not match.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await register(name.trim(), email.trim().toLowerCase(), password, phone.trim());
+    } catch (err) {
+      console.error('Registration failed:', err);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <KeyboardAvoidingView 
+      style={styles.container} 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          bounces={false}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+        {/* Header Section */}
+        <View style={styles.header}>
+          <TouchableOpacity 
+            style={styles.backButton} 
+            onPress={() => navigation.goBack()}
+          >
+            <Ionicons name="arrow-back" size={24} color="#ffffff" />
+          </TouchableOpacity>
+          <View style={styles.logoContainer}>
+            <BorrowBackMark size={42} />
+          </View>
+          <Text style={styles.appName}>Join BorrowBack</Text>
+          <Text style={styles.tagline}>Create your account to get started</Text>
+        </View>
+
+        {/* Bottom Sheet Section */}
+        <View style={styles.bottomSheet}>
+          <View style={styles.sheetHeader}>
+            <Text style={styles.welcomeText}>Create Account</Text>
+          </View>
+
+          <View style={styles.formContainer}>
+            <Input
+              placeholder="Full Name"
+              value={name}
+              onChangeText={(value) => {
+                setName(value);
+                setValidationError('');
+                clearError();
+              }}
+              autoCapitalize="words"
+              icon={<Ionicons name="person-outline" size={20} color="#64748b" />}
+              variant="underline"
+            />
+            
+            <View style={styles.spacer} />
+
+            <Input
+              placeholder="Email Address"
+              value={email}
+              onChangeText={(value) => {
+                setEmail(value);
+                setValidationError('');
+                clearError();
+              }}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="email"
+              textContentType="emailAddress"
+              icon={<Ionicons name="mail-outline" size={20} color="#64748b" />}
+              variant="underline"
+            />
+            
+            <View style={styles.spacer} />
+
+            <Input
+              placeholder="Phone Number"
+              value={phone}
+              onChangeText={(value) => {
+                setPhone(value);
+                setValidationError('');
+                clearError();
+              }}
+              keyboardType="phone-pad"
+              icon={<Ionicons name="call-outline" size={20} color="#64748b" />}
+              variant="underline"
+            />
+            
+            <View style={styles.spacer} />
+
+            <Input
+              placeholder="Password"
+              value={password}
+              onChangeText={(value) => {
+                setPassword(value);
+                setValidationError('');
+                clearError();
+              }}
+              secureTextEntry
+              icon={<Ionicons name="lock-closed-outline" size={20} color="#64748b" />}
+              variant="underline"
+            />
+            
+            <View style={styles.spacer} />
+
+            <Input
+              placeholder="Confirm Password"
+              value={confirmPassword}
+              onChangeText={(value) => {
+                setConfirmPassword(value);
+                setValidationError('');
+                clearError();
+              }}
+              secureTextEntry
+              icon={<Ionicons name="lock-closed-outline" size={20} color="#64748b" />}
+              variant="underline"
+            />
+
+            {(error || validationError) ? (
+              <View style={styles.errorContainer}>
+                <Ionicons name="alert-circle-outline" size={16} color="#e11d48" />
+                <Text style={styles.errorText}>
+                  {validationError || error || 'Something went wrong. Please try again.'}
+                </Text>
+              </View>
+            ) : <View style={styles.emptyErrorSpace} />}
+
+            <Button
+              title="Register"
+              onPress={handleRegister}
+              loading={loading || submitting}
+              disabled={submitting}
+              style={styles.registerBtn}
+            />
+
+            <View style={styles.loginContainer}>
+              <Text style={styles.loginText}>Already have an account? </Text>
+              <TouchableOpacity onPress={() => navigation.navigate('Login')}>
+                <Text style={styles.loginLink}>Login</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+        </ScrollView>
+    </KeyboardAvoidingView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  scrollContent: {
+    flexGrow: 1,
+  },
+  header: {
+    minHeight: 250,
+    paddingVertical: 32,
+    backgroundColor: 'transparent',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 40,
+  },
+  backButton: {
+    position: 'absolute',
+    top: 50,
+    left: 20,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  logoContainer: {
+    width: 70,
+    height: 70,
+    backgroundColor: 'rgba(255,73,62,0.09)',
+    borderColor: 'rgba(255,112,101,0.26)',
+    borderWidth: 1,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+    shadowColor: theme.colors.secondary,
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
+    elevation: 3,
+  },
+  appName: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: theme.colors.text,
+    marginBottom: 8,
+    letterSpacing: 0.5,
+  },
+  tagline: {
+    fontSize: 15,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+  },
+  bottomSheet: {
+    flex: 1,
+    backgroundColor: theme.colors.glass,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: theme.borderRadius.xl,
+    marginHorizontal: 16,
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 24,
+    minHeight: 480,
+    ...theme.shadows.card,
+  },
+  sheetHeader: {
+    marginBottom: 24,
+  },
+  welcomeText: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: theme.colors.text,
+    marginBottom: 8,
+  },
+  formContainer: {
+    flex: 1,
+  },
+  spacer: {
+    height: 16,
+  },
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#3c242a',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  errorText: {
+    color: theme.colors.error,
+    marginLeft: 8,
+    fontSize: 14,
+    flex: 1,
+  },
+  emptyErrorSpace: {
+    height: 24,
+  },
+  registerBtn: {
+    marginTop: 8,
+    marginBottom: 24,
+    backgroundColor: theme.colors.secondary,
+  },
+  loginContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 'auto',
+    paddingTop: 16,
+  },
+  loginText: {
+    color: theme.colors.textSecondary,
+    fontSize: 15,
+  },
+  loginLink: {
+    color: theme.colors.secondary,
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+});
+
+export default RegisterScreen;

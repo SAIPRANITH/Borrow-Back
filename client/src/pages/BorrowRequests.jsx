@@ -1,0 +1,494 @@
+import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
+import api from '../api/api'
+import PaymentModal from '../components/PaymentModal'
+import { 
+ Check, 
+ X, 
+ RotateCcw, 
+ Loader, 
+ Calendar, 
+ IndianRupee, 
+ ArrowRight, 
+ Inbox,
+} from 'lucide-react'
+
+const getDepositStatus = (borrow) => borrow.depositStatus
+ || (Number(borrow.depositAmount ?? borrow.item?.depositAmount) > 0
+  ? (borrow.depositPaid ? (['returned', 'rejected'].includes(borrow.status) ? 'return_pending' : 'held') : 'pending')
+  : 'not_required')
+const depositStatusLabels = {
+ not_required: 'Not required',
+ pending: 'Payment required',
+ payment_pending: 'Awaiting confirmation',
+ held: 'Confirmed',
+ return_pending: 'Return required',
+ return_sent: 'Awaiting borrower acknowledgement',
+ returned: 'Returned and acknowledged',
+}
+
+export default function BorrowRequests() {
+ const [requests, setRequests] = useState([])
+ const [active, setActive] = useState([])
+ const [loading, setLoading] = useState(true)
+ const [acting, setActing] = useState('')
+ const [loadError, setLoadError] = useState('')
+ const [paymentModal, setPaymentModal] = useState({ isOpen: false, id: null, amount: 0 })
+
+ const load = async () => {
+ setLoadError('')
+ try {
+ const [reqR, lendR] = await Promise.all([
+ api.get('/borrows/incoming'), 
+ api.get('/borrows/lending')
+ ])
+ if (reqR.data.success) setRequests(reqR.data.requests.filter(r => r.status === 'pending'))
+ if (lendR.data.success) setActive(lendR.data.history.filter(b =>
+  ['active', 'overdue'].includes(b.status)
+  || (['returned', 'rejected'].includes(b.status) && (
+   ['return_pending', 'return_sent'].includes(getDepositStatus(b))
+   || b.finePaymentStatus === 'payment_pending'
+  ))
+ ))
+ } catch (err) {
+ console.error('Failed to load borrow requests:', err)
+ setLoadError(err.response?.data?.message || 'Could not load borrow requests. Please retry.')
+ }
+ setLoading(false)
+ }
+
+ useEffect(() => { 
+ load() 
+ }, [])
+
+ const act = async (id, action) => {
+ setActing(id + action)
+ try { 
+ await api.put(`/borrows/${id}/${action}`)
+ await load()
+ } catch (err) {
+ console.error(`Failed to perform ${action}:`, err)
+ window.alert(err.response?.data?.message || 'Could not update this borrow. Please try again.')
+ }
+ setActing('')
+ }
+
+ const recordDepositReturn = async () => {
+  if (!paymentModal.id) return false
+  try {
+   await api.put(`/borrows/${paymentModal.id}/return-deposit`)
+   await load()
+   return true
+  } catch (err) {
+   window.alert(err.response?.data?.message || 'Could not record the deposit return. Please try again.')
+   return false
+  }
+ }
+
+ if (loading) {
+ return (
+ <div className="flex flex-col items-center justify-center py-28 animate-scale-in">
+ <div className="loading-spinner mb-4"></div>
+ <p className="text-zinc-400 text-sm font-medium">Checking borrow requests...</p>
+ </div>
+ )
+ }
+
+ // Helper function for user initials avatar
+ const getInitials = (name) => {
+ if (!name) return 'U'
+ const parts = name.trim().split(' ')
+ if (parts.length >= 2) {
+ return (parts[0][0] + parts[1][0]).toUpperCase()
+ }
+ return name.slice(0, 2).toUpperCase()
+ }
+
+ return (
+ <div className="space-y-8 animate-scale-in">
+ {loadError && (
+  <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+   <span>{loadError}</span>
+   <button type="button" onClick={() => { setLoading(true); load() }} className="font-semibold text-red-100 underline underline-offset-2">Retry</button>
+  </div>
+ )}
+ {/* Hero Section */}
+ <div className="bb-feature-hero relative rounded-2xl overflow-hidden border border-white/10 shadow-2xl animate-card-enter">
+
+ {/* Hero Content */}
+ <div className="relative z-10 p-8 md:p-12 lg:p-14">
+ <div className="max-w-2xl">
+ <div className="flex items-center gap-2 mb-3">
+ <span className="bg-amber-500/20 text-amber-400 border border-amber-500/30 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
+ <Inbox className="w-3.5 h-3.5" /> Request Manager
+ </span>
+ </div>
+ 
+ <h1 className="text-3xl sm:text-4xl font-extrabold text-zinc-100 tracking-tight leading-tight mb-3">
+ Borrow <span className="text-amber-400">Requests</span>
+ </h1>
+ 
+ <p className="text-zinc-300 text-sm sm:text-base opacity-90 leading-relaxed mb-6">
+ Review incoming borrow requests from peers across campus, accept or decline proposals, and confirm returned items safely.
+ </p>
+ </div>
+
+ {/* Status Metrics */}
+ <div className="flex flex-wrap items-center gap-3 text-xs">
+ <div className="flex items-center gap-2 bg-zinc-900/80 backdrop-blur-md px-3.5 py-1.5 rounded-lg border border-white/10 text-zinc-300">
+ <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+ <span>Pending Requests: <strong className="text-amber-400 font-semibold">{requests.length}</strong></span>
+ </div>
+ <div className="flex items-center gap-2 bg-zinc-900/80 backdrop-blur-md px-3.5 py-1.5 rounded-lg border border-white/10 text-zinc-300">
+ <span className="w-2 h-2 rounded-full bg-blue-400"></span>
+ <span>Borrow & Deposit Follow-ups: <strong className="text-blue-400 font-semibold">{active.length}</strong></span>
+ </div>
+ </div>
+ </div>
+ </div>
+
+ <nav aria-label="Borrowing sections" className="mb-6 flex flex-wrap gap-2">
+ <Link to="/my-borrows" className="rounded-xl border border-white/10 bg-zinc-900/60 px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:border-white/20 hover:text-white">
+ My Borrows
+ </Link>
+ <Link to="/requests" aria-current="page" className="rounded-xl border border-cyan-400/20 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-200">
+ Requests to Approve
+ </Link>
+ </nav>
+
+ {/* Main Content */}
+ {requests.length === 0 && active.length === 0 ? (
+ <div className="glass-card hover:animate-border-glow text-center py-20 px-6 animate-scale-in border border-white/5 rounded-2xl">
+ <div className="w-16 h-16 rounded-2xl animate-bounce-soft bg-zinc-800/80 flex items-center justify-center mx-auto mb-4 border border-white/5">
+ <Inbox className="w-8 h-8 text-zinc-600" />
+ </div>
+ <p className="text-zinc-200 text-lg font-bold">No pending requests or active borrows</p>
+ <p className="text-zinc-500 text-sm mt-1 max-w-sm mx-auto">
+ When campus peers request to borrow your listed items, they will show up here for your approval.
+ </p>
+ <Link 
+ to="/my-items"
+ className="mt-6 btn-primary hover:animate-border-glow inline-flex items-center gap-2 text-sm py-2.5 px-5"
+ >
+ <span>View My Listed Items</span>
+ <ArrowRight className="w-4 h-4" />
+ </Link>
+ </div>
+ ) : (
+ <div className="space-y-10">
+ {/* Section 1: Pending Requests */}
+ {requests.length > 0 && (
+ <div className="space-y-4 animate-card-enter stagger-1">
+ <div className="flex items-center justify-between">
+ <div className="flex items-center gap-2.5">
+ <div className="w-2.5 h-2.5 rounded-full bg-amber-400"></div>
+ <h2 className="text-sm font-bold text-zinc-200 uppercase tracking-wider">
+ Pending Requests ({requests.length})
+ </h2>
+ </div>
+ <span className="text-xs text-zinc-500 font-medium">Awaiting your response</span>
+ </div>
+
+ <div className="space-y-4">
+ {requests.map(r => {
+ const initials = getInitials(r.borrower?.name)
+ const depositStatus = getDepositStatus(r)
+ const depositAmount = Number(r.depositAmount ?? r.item?.depositAmount ?? 0)
+ const depositReady = depositAmount <= 0 || depositStatus === 'held'
+ const isActingAccept = acting === r._id + 'accept'
+ const isActingReject = acting === r._id + 'reject'
+ const isActingDeposit = acting === r._id + 'confirm-deposit' || acting === r._id + 'reject-deposit'
+ const isActing = isActingAccept || isActingReject || isActingDeposit
+
+ return (
+ <div 
+ key={r._id} 
+ className="glass-card hover:animate-border-glow p-5 md:p-6 rounded-2xl border border-white/5 transition-all duration-300 flex flex-col md:flex-row md:items-center justify-between gap-5 group"
+ >
+ {/* Left Side: Avatar & Information */}
+ <div className="flex items-start gap-4 sm:gap-5">
+ {/* User Avatar Circle */}
+ <div className="w-13 h-13 rounded-2xl bg-gradient-to-br from-amber-500 via-orange-600 to-cyan-600 text-white font-bold text-base flex items-center justify-center shrink-0 shadow-lg shadow-amber-500/10 ring-2 ring-white/10 transition-transform">
+ {initials}
+ </div>
+
+ {/* Request Details */}
+ <div className="space-y-1.5">
+ <div className="flex items-center gap-2.5 flex-wrap">
+ <h3 className="text-zinc-100 font-bold text-base sm:text-lg">
+ {r.item?.name || 'Item'}
+ </h3>
+ <span className="badge-pending animate-pulse-glow">Pending Approval</span>
+ </div>
+
+ <p className="text-zinc-400 text-sm">
+ Requested by <span className="text-zinc-200 font-semibold">{r.borrower?.name || 'Student'}</span>
+ {r.borrower?.email && (
+ <span className="text-zinc-500 text-xs ml-1.5 font-normal">
+ ({r.borrower.email})
+ </span>
+ )}
+ </p>
+
+ {/* Info Pills */}
+ <div className="flex flex-wrap items-center gap-3 text-xs pt-1">
+ <span className="inline-flex items-center gap-1.5 bg-zinc-900/80 px-2.5 py-1 rounded-lg border border-white/5 text-zinc-300">
+ <Calendar className="w-3.5 h-3.5 text-cyan-400" />
+ Due: <strong className="text-zinc-200">{new Date(r.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</strong>
+ </span>
+
+ {depositAmount > 0 && (
+ <span className="inline-flex items-center gap-1 bg-emerald-500/10 text-emerald-400 px-2.5 py-1 rounded-lg border border-emerald-500/20 font-medium">
+ <IndianRupee className="w-3.5 h-3.5" />
+ ₹{depositAmount} Deposit · {depositStatusLabels[depositStatus] || 'Unpaid'}
+ </span>
+ )}
+
+ {r.item?.finePerDay !== undefined && (
+ <span className="text-zinc-500">
+ ₹{r.item.finePerDay}/day fine
+ </span>
+ )}
+ </div>
+ </div>
+ </div>
+
+ {/* Right Side: Deposit verification must finish before accepting the request. */}
+ <div className="flex flex-col gap-2 self-end md:self-center shrink-0 w-full md:w-auto pt-3 md:pt-0 border-t md:border-t-0 border-white/5">
+ {depositStatus === 'payment_pending' && (
+ <div className="flex flex-wrap gap-2">
+  <button
+   onClick={() => window.confirm(`Confirm only after you have received the ₹${depositAmount} deposit.`) && act(r._id, 'confirm-deposit')}
+   disabled={isActing}
+   className="btn-success flex-1 text-xs py-2.5 px-4"
+  >
+   {acting === r._id + 'confirm-deposit' ? <Loader className="w-4 h-4 animate-spin" /> : 'Confirm Deposit Received'}
+  </button>
+  <button
+   onClick={() => act(r._id, 'reject-deposit')}
+   disabled={isActing}
+   className="btn-outline text-xs py-2.5 px-4"
+  >
+   Not Received
+  </button>
+ </div>
+ )}
+ {depositAmount > 0 && !depositReady && (
+  <p className="max-w-xs text-xs text-amber-300">
+   {depositStatus === 'payment_pending'
+    ? 'Confirm the deposit after receipt; then you can accept this request.'
+    : 'The borrower must pay and you must confirm the deposit before accepting.'}
+  </p>
+ )}
+ <div className="flex items-center gap-3">
+ <button 
+ onClick={() => act(r._id, 'accept')} 
+ disabled={isActing || !depositReady}
+ className="btn-success flex-1 md:flex-initial text-xs py-2.5 px-5 flex items-center justify-center gap-2 shadow-md shadow-emerald-500/20 hover:scale-[1.02] active:scale-[0.98] transition-all"
+ title="Accept this request"
+ >
+ {isActingAccept ? (
+ <Loader className="w-4 h-4 animate-rotate-in" />
+ ) : (
+ <>
+ <Check className="w-4 h-4" />
+ <span>Accept Request</span>
+ </>
+ )}
+ </button>
+
+ <button 
+ onClick={() => act(r._id, 'reject')} 
+ disabled={isActing || depositStatus === 'payment_pending'}
+ className="btn-danger flex-1 md:flex-initial text-xs py-2.5 px-5 flex items-center justify-center gap-2 shadow-md shadow-red-500/20 hover:scale-[1.02] active:scale-[0.98] transition-all"
+ title="Decline this request"
+ >
+ {isActingReject ? (
+ <Loader className="w-4 h-4 animate-rotate-in" />
+ ) : (
+ <>
+ <X className="w-4 h-4" />
+ <span>Decline</span>
+ </>
+ )}
+ </button>
+ </div>
+ </div>
+ </div>
+ )
+ })}
+ </div>
+ </div>
+ )}
+
+ {/* Section 2: Active Borrows (Confirm Return) */}
+ {active.length > 0 && (
+ <div className="space-y-4 animate-card-enter stagger-2">
+ <div className="flex items-center justify-between">
+ <div className="flex items-center gap-2.5">
+ <div className="w-2.5 h-2.5 rounded-full bg-cyan-400"></div>
+ <h2 className="text-sm font-bold text-zinc-200 uppercase tracking-wider">
+ Borrow & Deposit Follow-ups ({active.length})
+ </h2>
+ </div>
+ <span className="text-xs text-zinc-500 font-medium">Confirm returns and settle deposits</span>
+ </div>
+
+ <div className="space-y-4">
+ {active.map(b => {
+ const initials = getInitials(b.borrower?.name)
+ const isActingReturn = acting === b._id + 'confirm-return'
+ const depositStatus = getDepositStatus(b)
+ const depositAmount = Number(b.depositAmount ?? b.item?.depositAmount ?? 0)
+ const isOverdue = new Date(b.dueDate) < new Date()
+
+ return (
+ <div 
+ key={b._id} 
+ className="glass-card hover:animate-border-glow p-5 md:p-6 rounded-2xl border border-white/5 transition-all duration-300 flex flex-col md:flex-row md:items-center justify-between gap-5 group"
+ >
+ {/* Left Side: Avatar & Information */}
+ <div className="flex items-start gap-4 sm:gap-5">
+ {/* User Avatar Circle */}
+ <div className="w-13 h-13 rounded-2xl bg-gradient-to-br from-cyan-500 via-blue-600 to-cyan-600 text-white font-bold text-base flex items-center justify-center shrink-0 shadow-lg shadow-cyan-500/10 ring-2 ring-white/10 transition-transform">
+ {initials}
+ </div>
+
+ {/* Details */}
+ <div className="space-y-1.5">
+ <div className="flex items-center gap-2.5 flex-wrap">
+ <h3 className="text-zinc-100 font-bold text-base sm:text-lg">
+ {b.item?.name || 'Item'}
+ </h3>
+ <span className={b.status === 'returned' ? 'badge-returned' : isOverdue ? 'badge-overdue animate-pulse-glow' : 'badge-active animate-pulse-glow'}>
+ {b.status === 'returned' ? 'Returned' : isOverdue ? 'Overdue' : 'Active Borrow'}
+ </span>
+ </div>
+
+ <p className="text-zinc-400 text-sm">
+ Currently with <span className="text-zinc-200 font-semibold">{b.borrower?.name || 'Student'}</span>
+ {b.borrower?.email && (
+ <span className="text-zinc-500 text-xs ml-1.5 font-normal">
+ ({b.borrower.email})
+ </span>
+ )}
+ </p>
+
+ {/* Info Pills */}
+ <div className="flex flex-wrap items-center gap-3 text-xs pt-1">
+ <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border ${
+ isOverdue 
+ ? 'bg-red-500/10 border-red-500/20 text-red-400 font-medium' 
+ : 'bg-zinc-900/80 border-white/5 text-zinc-300'
+ }`}>
+ <Calendar className="w-3.5 h-3.5 text-cyan-400" />
+ Return Due: <strong className={isOverdue ? 'text-red-400' : 'text-zinc-200'}>
+ {new Date(b.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+ </strong>
+ </span>
+
+ {depositAmount > 0 && (
+ <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border font-medium ${
+  ['held', 'return_pending', 'return_sent', 'returned'].includes(depositStatus)
+   ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+   : 'bg-amber-500/10 text-amber-300 border-amber-500/20'
+ }`}>
+ <IndianRupee className="w-3.5 h-3.5" />
+ ₹{depositAmount} Deposit · {depositStatus.replace(/_/g, ' ')}
+ </span>
+ )}
+
+ {b.borrowDate && (
+ <span className="text-zinc-500">
+ Lent on: {new Date(b.borrowDate).toLocaleDateString('en-IN')}
+ </span>
+ )}
+ </div>
+ </div>
+ </div>
+
+ {/* Right Side: Action Button */}
+ <div className="self-end md:self-center shrink-0 w-full md:w-auto pt-3 md:pt-0 border-t md:border-t-0 border-white/5">
+ {['returned', 'rejected'].includes(b.status) && depositStatus === 'return_pending' ? (
+ <button
+  onClick={() => setPaymentModal({ isOpen: true, id: b._id, amount: depositAmount })}
+  disabled={acting === b._id + 'return-deposit'}
+  className="btn-primary w-full md:w-auto text-xs py-2.5 px-6 flex items-center justify-center gap-2"
+  title="Confirm you returned the deposit to the borrower"
+ >
+  {acting === b._id + 'return-deposit' ? <Loader className="w-4 h-4 animate-rotate-in" /> : <IndianRupee className="w-4 h-4" />}
+  Mark Deposit Returned
+ </button>
+ ) : ['returned', 'rejected'].includes(b.status) && depositStatus === 'return_sent' ? (
+ <span className="text-xs text-cyan-300">Deposit marked returned — waiting for borrower acknowledgement</span>
+ ) : b.status === 'returned' && b.finePaymentStatus === 'payment_pending' ? (
+ <div className="flex flex-wrap gap-2">
+  <button
+   onClick={() => window.confirm(`Confirm only after receiving the ₹${b.fineAmount} fine payment.`) && act(b._id, 'confirm-fine')}
+   disabled={acting === b._id + 'confirm-fine' || acting === b._id + 'reject-fine'}
+   className="btn-success text-xs py-2.5 px-4"
+  >Confirm Fine Received</button>
+  <button
+   onClick={() => act(b._id, 'reject-fine')}
+   disabled={acting === b._id + 'confirm-fine' || acting === b._id + 'reject-fine'}
+   className="btn-outline text-xs py-2.5 px-4"
+  >Not Received</button>
+ </div>
+ ) : b.status === 'returned' ? (
+ <span className="text-xs text-zinc-400">Return complete</span>
+ ) : depositStatus === 'payment_pending' ? (
+ <div className="flex flex-wrap gap-2">
+  <button
+   onClick={() => window.confirm(`Confirm only after you have received the ₹${depositAmount} deposit.`) && act(b._id, 'confirm-deposit')}
+   disabled={acting === b._id + 'confirm-deposit' || acting === b._id + 'reject-deposit'}
+   className="btn-success text-xs py-2.5 px-4"
+  >
+   Confirm Deposit Received
+  </button>
+  <button
+   onClick={() => act(b._id, 'reject-deposit')}
+   disabled={acting === b._id + 'confirm-deposit' || acting === b._id + 'reject-deposit'}
+   className="btn-danger text-xs py-2.5 px-4"
+  >
+   Not Received
+  </button>
+ </div>
+ ) : b.returnSignaledAt ? (
+ <button 
+ onClick={() => window.confirm('Confirm only after you have received and checked the item. This completes the return and calculates any late fine.') && act(b._id, 'confirm-return')}
+ disabled={isActingReturn} 
+ className="btn-primary hover:animate-border-glow w-full md:w-auto text-xs py-2.5 px-6 flex items-center justify-center gap-2 shadow-md shadow-cyan-500/25 hover:scale-[1.02] active:scale-[0.98] transition-all"
+ title="Confirm that the borrower has returned this item"
+ >
+ {isActingReturn ? (
+ <Loader className="w-4 h-4 animate-rotate-in" />
+ ) : (
+ <>
+ <RotateCcw className="w-4 h-4" />
+ <span>Confirm Return & Release</span>
+ </>
+ )}
+ </button>
+ ) : (
+ <span className="text-xs text-zinc-400">Waiting for borrower to signal return</span>
+ )}
+ </div>
+ </div>
+ )
+ })}
+ </div>
+ </div>
+ )}
+ <PaymentModal
+  isOpen={paymentModal.isOpen}
+  title="Return Security Deposit"
+  amount={paymentModal.amount}
+  invoiceId={paymentModal.id?.slice(0, 7).toUpperCase()}
+  onClose={() => setPaymentModal({ isOpen: false, id: null, amount: 0 })}
+  onSuccess={recordDepositReturn}
+ />
+ </div>
+ )}
+ </div>
+ )
+}
